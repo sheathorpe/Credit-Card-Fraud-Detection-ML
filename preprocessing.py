@@ -23,21 +23,32 @@ def transform_data(df):
     transform_transaction_date(df)
     transform_amount(df)
 
+    df['TimeOfDay'] = df['TimeOfDay'].map(time_encoding)
+    df['DayOfWeek'] = df['DayOfWeek'].map(weekday_encoding)
+    df['TransactionType'] = df['TransactionType'].map(transaction_type_encoding)
+    df['Location'] = df['Location'].map(location_encoding)
+
     train_df, test_df = train_test_split(df, test_size=0.2, random_state=0)
     compute_fraud_rate_for_merchant_id(train_df, test_df)
 
-    df.drop(['TransactionDate', 'Hour', 'Amount', 'TransactionID', 'MerchantID'], axis='columns')
+    columns_to_drop = ['TransactionDate', 'Hour', 'Amount', 'TransactionID', 'MerchantID']
+
+    test_df.drop(
+        columns_to_drop, axis='columns', inplace=True
+    )
+
+    train_df.drop(
+        columns_to_drop, axis='columns', inplace=True
+    )
+
+    test_df.dropna(axis='rows', inplace=True)
+    train_df.dropna(axis='rows', inplace=True)
 
     x_train = train_df.drop('IsFraud', axis=1)
     y_train = train_df['IsFraud']
 
     x_test = test_df.drop('IsFraud', axis=1)
     y_test = test_df['IsFraud']
-
-    df['TimeOfDay'] = df['TimeOfDay'].map(time_encoding)
-    df['DayOfWeek'] = df['DayOfWeek'].map(weekday_encoding)
-    df['TransactionType'] = df['TransactionType'].map(transaction_type_encoding)
-    df['Location'] = df['Location'].map(location_encoding)
 
     return x_train, y_train, x_test, y_test
 
