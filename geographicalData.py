@@ -12,20 +12,18 @@ for v in acsvariables:
     censusdf[v] = pd.to_numeric(censusdf[v])
 
 censusdf.rename(columns={
+    'NAME': 'name',
     'B19013_001E': 'medianIncome',
-    "B17001_001E": "totalPopulation",
-    "B17001_002E": "belowPoverty",
-    "B19083_001E": "giniIndex",
-    "B25003_001E": "housedPopulation",
-    "B25003_003E": "renters",
-    "B23025_003E": "totalLaborForce",
-    "B23025_005E": "laborForceUnemployed"
-})
+    'B17001_001E': 'totalPopulation',
+    'B17001_002E': 'belowPoverty',
+    'B19083_001E': 'giniIndex',
+    'B25003_001E': 'housedPopulation',
+    'B25003_003E': 'renters',
+    'B23025_003E': 'totalLaborForce',
+    'B23025_005E': 'laborForceUnemployed',
+    'metropolitan statistical area/micropolitan statistical area': 'metroArea'
+}, inplace=True)
 
-censusdf.columns = ['name', 'medianIncome', 'totalPopulation', 'belowPoverty', 'giniIndex',
- 'housedPopulation', 'renters', 'totalLaborForce', 'laborForceUnemployed', 'metroArea']
-
-#print(censusdf[1:5])
 metroAreas = ['Chicago-Naperville-Elgin, IL-IN Metro Area', 
             'Dallas-Fort Worth-Arlington, TX Metro Area',
             'Houston-Pasadena-The Woodlands, TX Metro Area',
@@ -36,8 +34,6 @@ metroAreas = ['Chicago-Naperville-Elgin, IL-IN Metro Area',
             'San Antonio-New Braunfels, TX Metro Area',
             'San Diego-Chula Vista-Carlsbad, CA Metro Area',
             'San Jose-Sunnyvale-Santa Clara, CA Metro Area']
-
-#print(censusdf[censusdf['name'].isin(metroAreas)])
 
 frauddf = censusdf[censusdf['name'].isin(metroAreas)]
 
@@ -51,6 +47,8 @@ frauddf = frauddf.drop(columns=['renters', 'housedPopulation'])
 
 frauddf['unemploymentRate'] = frauddf['laborForceUnemployed'] / frauddf['totalLaborForce']
 frauddf = frauddf.drop(columns=['laborForceUnemployed', 'totalLaborForce'])
+
+frauddf['name'] = frauddf['name'].str.split('-').str[0]
 
 print(frauddf)
 
