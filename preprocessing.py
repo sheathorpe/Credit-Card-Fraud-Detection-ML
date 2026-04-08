@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import RobustScaler
 
@@ -19,9 +18,22 @@ location_encoding = {
     'Phoenix': 4, 'Chicago': 5, 'San Jose': 6, 'San Diego': 7, 'Houston': 8, 'Los Angeles': 9
 }
 
+metroAreas = ['Chicago-Naperville-Elgin, IL-IN Metro Area',
+            'Dallas-Fort Worth-Arlington, TX Metro Area',
+            'Houston-Pasadena-The Woodlands, TX Metro Area',
+            'Los Angeles-Long Beach-Anaheim, CA Metro Area',
+            'New York-Newark-Jersey City, NY-NJ Metro Area',
+            'Philadelphia-Camden-Wilmington, PA-NJ-DE-MD Metro Area',
+            'Phoenix-Mesa-Chandler, AZ Metro Area',
+            'San Antonio-New Braunfels, TX Metro Area',
+            'San Diego-Chula Vista-Carlsbad, CA Metro Area',
+            'San Jose-Sunnyvale-Santa Clara, CA Metro Area']
+
 def transform_data(df):
     transform_transaction_date(df)
     transform_amount(df)
+
+    df = merge_census_data_with_fraud_data(df)
 
     df['TimeOfDay'] = df['TimeOfDay'].map(time_encoding)
     df['DayOfWeek'] = df['DayOfWeek'].map(weekday_encoding)
@@ -31,6 +43,7 @@ def transform_data(df):
     train_df, test_df = train_test_split(df, test_size=0.2, random_state=0)
     compute_fraud_rate_for_merchant_id(train_df, test_df)
 
+    # columns_to_drop = ['TransactionDate', 'Hour', 'Amount', 'TransactionID', 'MerchantID', 'name']
     columns_to_drop = ['TransactionDate', 'Hour', 'Amount', 'TransactionID', 'MerchantID']
 
     test_df.drop(
@@ -60,7 +73,6 @@ def transform_transaction_date(df):
 
     df['Hour'] = df['TransactionDate'].dt.hour
     df['TimeOfDay'] = pd.cut(x=df['Hour'], bins=time_bins, labels=time_labels)
-
     df['DayOfWeek'] = df['TransactionDate'].dt.day_name()
 
 def transform_amount(df):
@@ -74,3 +86,56 @@ def compute_fraud_rate_for_merchant_id(train_df, test_df):
     train_df['MerchantFraudRate'] = train_df['MerchantID'].map(fraud_rates_by_merchant_id)
     test_df['MerchantFraudRate'] = test_df['MerchantID'].map(fraud_rates_by_merchant_id)
     test_df['MerchantFraudRate'] = test_df['MerchantFraudRate'].fillna(avg_fraud)
+
+def load_census_data():
+    census_df = pd.read_json('data/acs5.json')
+    census_df.columns = census_df.iloc[0]
+    census_df = census_df[1:]
+
+    acs_variables = ["B19013_001E", "B17001_001E", "B17001_002E", "B19083_001E",
+                     "B25003_001E", "B25003_003E", "B23025_003E", "B23025_005E"]
+
+    for v in acs_variables:
+        census_df[v] = pd.to_numeric(census_df[v])
+
+    census_df.rename(columns={
+        "NAME": "name",
+        'B19013_001E': 'medianIncome',
+        "B17001_001E": "totalPopulation",
+        "B17001_002E": "belowPoverty",
+        "B19083_001E": "giniIndex",
+        "B25003_001E": "housedPopulation",
+        "B25003_003E": "renters",
+        "B23025_003E": "totalLaborForce",
+        "B23025_005E": "laborForceUnemployed",
+        'metropolitan statistical area/micropolitan statistical area': 'metroArea'
+    }, inplace=True)
+
+    fraud_df = census_df[census_df['name'].isin(metroAreas)]
+    fraud_df = fraud_df.drop(columns=['metroArea'])
+
+    fraud_df['povertyRate'] = fraud_df['belowPoverty'] / fraud_df['totalPopulation']
+    fraud_df = fraud_df.drop(columns=['belowPoverty', 'totalPopulation'])
+
+    fraud_df['renterPercentage'] = fraud_df['renters'] / fraud_df['housedPopulation']
+    fraud_df = fraud_df.drop(columns=['renters', 'housedPopulation'])
+
+    fraud_df['unemploymentRate'] = fraud_df['laborForceUnemployed'] / fraud_df['totalLaborForce']
+    fraud_df = fraud_df.drop(columns=['laborForceUnemployed', 'totalLaborForce'])
+
+    fraud_df['name'] = fraud_df['name'].str.split('-').str[0]
+
+    return fraud_df
+
+def merge_census_data_with_fraud_data(fraud_df):
+    census_df = load_census_data()
+
+    fraud_df = pd.merge(
+        fraud_df,
+        census_df,
+        left_on='Location',
+        right_on='name',
+        how='left'
+    )
+
+    return fraud_df
