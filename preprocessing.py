@@ -1,6 +1,8 @@
 import pandas as pd
 from sklearn.model_selection import train_test_split
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import RobustScaler
+from sklearn.cluster import DBSCAN, MiniBatchKMeans
 
 scaler = RobustScaler()
 
@@ -31,7 +33,6 @@ metroAreas = ['Chicago-Naperville-Elgin, IL-IN Metro Area',
 
 def transform_data(df):
     transform_transaction_date(df)
-    transform_amount(df)
 
     df = merge_census_data_with_fraud_data(df)
 
@@ -40,11 +41,12 @@ def transform_data(df):
     df['TransactionType'] = df['TransactionType'].map(transaction_type_encoding)
     df['Location'] = df['Location'].map(location_encoding)
 
-    train_df, test_df = train_test_split(df, test_size=0.2, random_state=0)
+    train_df, test_df = train_test_split(df, test_size=0.2, random_state=0, stratify=df['IsFraud'])
     compute_fraud_rate_for_merchant_id(train_df, test_df)
+    transform_amount(train_df, test_df)
+    perform_clustering(train_df, test_df)
 
-    # columns_to_drop = ['TransactionDate', 'Hour', 'Amount', 'TransactionID', 'MerchantID', 'name']
-    columns_to_drop = ['TransactionDate', 'Hour', 'Amount', 'TransactionID', 'MerchantID']
+    columns_to_drop = ['TransactionDate', 'Hour', 'Amount', 'TransactionID', 'MerchantID', 'name']
 
     test_df.drop(
         columns_to_drop, axis='columns', inplace=True
@@ -72,12 +74,14 @@ def transform_transaction_date(df):
     time_labels = ['Late Night', 'Morning', 'Afternoon', 'Night']
 
     df['Hour'] = df['TransactionDate'].dt.hour
-    df['TimeOfDay'] = pd.cut(x=df['Hour'], bins=time_bins, labels=time_labels)
+    df['TimeOfDay'] = pd.cut(x=df['Hour'], bins=time_bins, labels=time_labels, include_lowest=True)
     df['DayOfWeek'] = df['TransactionDate'].dt.day_name()
 
-def transform_amount(df):
-    scaler.fit(df[['Amount']])
-    df['AmountScaled'] = scaler.transform(df[['Amount']])
+def transform_amount(train_df, test_df):
+    scaler.fit(train_df[['Amount']])
+
+    train_df['AmountScaled'] = scaler.transform(train_df[['Amount']])
+    test_df['AmountScaled'] = scaler.transform(test_df[['Amount']])
 
 def compute_fraud_rate_for_merchant_id(train_df, test_df):
     avg_fraud = train_df['IsFraud'].mean()
@@ -139,3 +143,30 @@ def merge_census_data_with_fraud_data(fraud_df):
     )
 
     return fraud_df
+
+def perform_clustering(train_df, test_df):
+    clustering_features = ['AmountScaled', 'MerchantFraudRate', 'unemploymentRate']
+
+    # K-MEANS (This part was already perfect)
+    kmeans = MiniBatchKMeans(n_clusters=5, random_state=0, n_init='auto')
+    kmeans.fit(train_df[clustering_features])
+    train_df['DistToClusterCenter'] = kmeans.transform(train_df[clustering_features]).min(axis=1)
+    test_df['DistToClusterCenter'] = kmeans.transform(test_df[clustering_features]).min(axis=1)
+
+    # DBSCAN SAMPLE
+    sample_size = 50000
+    sample_df = train_df.sample(n=sample_size, random_state=0)
+
+    dbscan = DBSCAN(eps=0.5, min_samples=10)
+    sample_cluster_labels = dbscan.fit_predict(sample_df[clustering_features])
+
+    # 1. Get the noise labels JUST for the 10k sample
+    sample_is_noise = (sample_cluster_labels == -1).astype(int)
+
+    # 2. Train the KNN Surrogate on the 10k sample X and 10k sample y
+    knn_surrogate = KNeighborsClassifier(n_neighbors=5)
+    knn_surrogate.fit(sample_df[clustering_features], sample_is_noise)
+
+    # 3. Predict the noise flag for the FULL 80k train set and 20k test set
+    train_df['IsNoise'] = knn_surrogate.predict(train_df[clustering_features])
+    test_df['IsNoise'] = knn_surrogate.predict(test_df[clustering_features])
