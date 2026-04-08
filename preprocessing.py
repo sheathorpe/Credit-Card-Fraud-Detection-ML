@@ -1,6 +1,7 @@
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import RobustScaler
+from sklearn.cluster import DBSCAN, MiniBatchKMeans
 
 scaler = RobustScaler()
 
@@ -31,7 +32,6 @@ metroAreas = ['Chicago-Naperville-Elgin, IL-IN Metro Area',
 
 def transform_data(df):
     transform_transaction_date(df)
-    transform_amount(df)
 
     df = merge_census_data_with_fraud_data(df)
 
@@ -40,11 +40,11 @@ def transform_data(df):
     df['TransactionType'] = df['TransactionType'].map(transaction_type_encoding)
     df['Location'] = df['Location'].map(location_encoding)
 
-    train_df, test_df = train_test_split(df, test_size=0.2, random_state=0)
+    train_df, test_df = train_test_split(df, test_size=0.2, random_state=0, stratify=df['IsFraud'])
     compute_fraud_rate_for_merchant_id(train_df, test_df)
+    transform_amount(train_df, test_df)
 
-    # columns_to_drop = ['TransactionDate', 'Hour', 'Amount', 'TransactionID', 'MerchantID', 'name']
-    columns_to_drop = ['TransactionDate', 'Hour', 'Amount', 'TransactionID', 'MerchantID']
+    columns_to_drop = ['TransactionDate', 'Hour', 'Amount', 'TransactionID', 'MerchantID', 'name']
 
     test_df.drop(
         columns_to_drop, axis='columns', inplace=True
@@ -75,9 +75,11 @@ def transform_transaction_date(df):
     df['TimeOfDay'] = pd.cut(x=df['Hour'], bins=time_bins, labels=time_labels)
     df['DayOfWeek'] = df['TransactionDate'].dt.day_name()
 
-def transform_amount(df):
-    scaler.fit(df[['Amount']])
-    df['AmountScaled'] = scaler.transform(df[['Amount']])
+def transform_amount(train_df, test_df):
+    scaler.fit(train_df[['Amount']])
+
+    train_df['AmountScaled'] = scaler.transform(train_df[['Amount']])
+    test_df['AmountScaled'] = scaler.transform(test_df[['Amount']])
 
 def compute_fraud_rate_for_merchant_id(train_df, test_df):
     avg_fraud = train_df['IsFraud'].mean()
