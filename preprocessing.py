@@ -4,8 +4,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import RobustScaler
 from sklearn.cluster import DBSCAN, MiniBatchKMeans
 
-scaler = RobustScaler()
-
+# Numerical encoding maps for categorical values in fraud data set
 time_encoding = {'Late Night': 0, 'Morning': 1, 'Afternoon': 2, 'Night': 3}
 
 weekday_encoding = {
@@ -20,75 +19,40 @@ location_encoding = {
     'Phoenix': 4, 'Chicago': 5, 'San Jose': 6, 'San Diego': 7, 'Houston': 8, 'Los Angeles': 9
 }
 
-metroAreas = ['Chicago-Naperville-Elgin, IL-IN Metro Area',
-            'Dallas-Fort Worth-Arlington, TX Metro Area',
-            'Houston-Pasadena-The Woodlands, TX Metro Area',
-            'Los Angeles-Long Beach-Anaheim, CA Metro Area',
-            'New York-Newark-Jersey City, NY-NJ Metro Area',
-            'Philadelphia-Camden-Wilmington, PA-NJ-DE-MD Metro Area',
-            'Phoenix-Mesa-Chandler, AZ Metro Area',
-            'San Antonio-New Braunfels, TX Metro Area',
-            'San Diego-Chula Vista-Carlsbad, CA Metro Area',
-            'San Jose-Sunnyvale-Santa Clara, CA Metro Area']
-
-def transform_data(df):
-    transform_transaction_date(df)
-
-    df = merge_census_data_with_fraud_data(df)
-
-    df['TimeOfDay'] = df['TimeOfDay'].map(time_encoding)
-    df['DayOfWeek'] = df['DayOfWeek'].map(weekday_encoding)
-    df['TransactionType'] = df['TransactionType'].map(transaction_type_encoding)
-    df['Location'] = df['Location'].map(location_encoding)
-
-    train_df, test_df = train_test_split(df, test_size=0.2, random_state=0, stratify=df['IsFraud'])
-    compute_fraud_rate_for_merchant_id(train_df, test_df)
-    transform_amount(train_df, test_df)
-    perform_clustering(train_df, test_df)
-
-    columns_to_drop = ['TransactionDate', 'Hour', 'Amount', 'TransactionID', 'MerchantID', 'name']
-
-    test_df.drop(
-        columns_to_drop, axis='columns', inplace=True
-    )
-
-    train_df.drop(
-        columns_to_drop, axis='columns', inplace=True
-    )
-
-    test_df.dropna(axis='rows', inplace=True)
-    train_df.dropna(axis='rows', inplace=True)
-
-    x_train = train_df.drop('IsFraud', axis=1)
-    y_train = train_df['IsFraud']
-
-    x_test = test_df.drop('IsFraud', axis=1)
-    y_test = test_df['IsFraud']
-
-    return x_train, y_train, x_test, y_test
-
 def transform_transaction_date(df):
     df['TransactionDate'] = pd.to_datetime(df['TransactionDate'])
 
     time_bins = [0, 6, 12, 18, 24]
     time_labels = ['Late Night', 'Morning', 'Afternoon', 'Night']
 
+    # extracting hour adding as separate column
     df['Hour'] = df['TransactionDate'].dt.hour
+
+    # binning hours column use time bins and labels for new feature
     df['TimeOfDay'] = pd.cut(x=df['Hour'], bins=time_bins, labels=time_labels, include_lowest=True)
+
+    # extracting day of week string for each date for new feature
     df['DayOfWeek'] = df['TransactionDate'].dt.day_name()
 
 def transform_amount(train_df, test_df):
+    scaler = RobustScaler()
+
+    # fitting on training only to avoid data leakage
     scaler.fit(train_df[['Amount']])
 
+    # scaling both sets
     train_df['AmountScaled'] = scaler.transform(train_df[['Amount']])
     test_df['AmountScaled'] = scaler.transform(test_df[['Amount']])
 
 def compute_fraud_rate_for_merchant_id(train_df, test_df):
-    avg_fraud = train_df['IsFraud'].mean()
     fraud_rates_by_merchant_id = train_df.groupby('MerchantID')['IsFraud'].mean()
 
+    # mapping merchant fraud rate calculations by merchant id
     train_df['MerchantFraudRate'] = train_df['MerchantID'].map(fraud_rates_by_merchant_id)
     test_df['MerchantFraudRate'] = test_df['MerchantID'].map(fraud_rates_by_merchant_id)
+
+    # default fraud for any na values in test set
+    avg_fraud = train_df['IsFraud'].mean()
     test_df['MerchantFraudRate'] = test_df['MerchantFraudRate'].fillna(avg_fraud)
 
 def load_census_data():
@@ -96,10 +60,21 @@ def load_census_data():
     census_df.columns = census_df.iloc[0]
     census_df = census_df[1:]
 
-    acs_variables = ["B19013_001E", "B17001_001E", "B17001_002E", "B19083_001E",
+    census_data_features = ["B19013_001E", "B17001_001E", "B17001_002E", "B19083_001E",
                      "B25003_001E", "B25003_003E", "B23025_003E", "B23025_005E"]
 
-    for v in acs_variables:
+    metro_areas = ['Chicago-Naperville-Elgin, IL-IN Metro Area',
+                  'Dallas-Fort Worth-Arlington, TX Metro Area',
+                  'Houston-Pasadena-The Woodlands, TX Metro Area',
+                  'Los Angeles-Long Beach-Anaheim, CA Metro Area',
+                  'New York-Newark-Jersey City, NY-NJ Metro Area',
+                  'Philadelphia-Camden-Wilmington, PA-NJ-DE-MD Metro Area',
+                  'Phoenix-Mesa-Chandler, AZ Metro Area',
+                  'San Antonio-New Braunfels, TX Metro Area',
+                  'San Diego-Chula Vista-Carlsbad, CA Metro Area',
+                  'San Jose-Sunnyvale-Santa Clara, CA Metro Area']
+
+    for v in census_data_features:
         census_df[v] = pd.to_numeric(census_df[v])
 
     census_df.rename(columns={
@@ -115,7 +90,7 @@ def load_census_data():
         'metropolitan statistical area/micropolitan statistical area': 'metroArea'
     }, inplace=True)
 
-    fraud_df = census_df[census_df['name'].isin(metroAreas)]
+    fraud_df = census_df[census_df['name'].isin(metro_areas)]
     fraud_df = fraud_df.drop(columns=['metroArea'])
 
     fraud_df['povertyRate'] = fraud_df['belowPoverty'] / fraud_df['totalPopulation']
@@ -170,3 +145,49 @@ def perform_clustering(train_df, test_df):
     # 3. Predict the noise flag for the FULL 80k train set and 20k test set
     train_df['IsNoise'] = knn_surrogate.predict(train_df[clustering_features])
     test_df['IsNoise'] = knn_surrogate.predict(test_df[clustering_features])
+
+def transform_data(fraud_df):
+    # splitting transaction date into day of week, time of day features
+    transform_transaction_date(fraud_df)
+
+    # merging fraud data with census data for the 10 cities in fraud dataset
+    fraud_df = merge_census_data_with_fraud_data(fraud_df)
+
+    # encoding categorical variables
+    fraud_df['TimeOfDay'] = fraud_df['TimeOfDay'].map(time_encoding)
+    fraud_df['DayOfWeek'] = fraud_df['DayOfWeek'].map(weekday_encoding)
+    fraud_df['TransactionType'] = fraud_df['TransactionType'].map(transaction_type_encoding)
+    fraud_df['Location'] = fraud_df['Location'].map(location_encoding)
+
+    # splitting data into training, testing sets
+    train_df, test_df = train_test_split(
+        fraud_df, test_size=0.2, random_state=0, stratify=fraud_df['IsFraud']
+    )
+
+    # calculating fraud rate, for validation set we use global average of training set to avoid data leaks
+    compute_fraud_rate_for_merchant_id(train_df, test_df)
+
+    # normalizing transaction amount using robust scaler
+    transform_amount(train_df, test_df)
+
+    # performing clustering on training set
+    perform_clustering(train_df, test_df)
+
+    # dropping unneeded features from both sets
+    columns_to_drop = ['TransactionDate', 'Hour', 'Amount', 'TransactionID', 'MerchantID', 'name']
+    test_df.drop(columns_to_drop, axis='columns', inplace=True)
+    train_df.drop(columns_to_drop, axis='columns', inplace=True)
+
+    # dropping any rows which have na from train/test sets
+    test_df.dropna(axis='rows', inplace=True)
+    train_df.dropna(axis='rows', inplace=True)
+
+    # getting features of each set
+    X_train = train_df.drop('IsFraud', axis=1)
+    X_test = test_df.drop('IsFraud', axis=1)
+
+    # targets of each set
+    y_train = train_df['IsFraud']
+    y_test = test_df['IsFraud']
+
+    return X_train, X_test, y_train, y_test
