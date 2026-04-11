@@ -1,25 +1,40 @@
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, recall_score, precision_score, roc_auc_score
 import pandas as pd
+from imblearn.over_sampling import SMOTE
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import recall_score, precision_score, roc_auc_score, accuracy_score
 from preprocessing import transform_data
 
 data_df = pd.read_csv('data/data.csv')
-x_train, y_train, x_test, y_test = transform_data(data_df)
+X_train, X_test, y_train, y_test = transform_data(data_df)
 
-model = RandomForestClassifier(
+rf_model = RandomForestClassifier(
     n_estimators=100,
     random_state=42,
-    class_weight='balanced'
+    # making the punishment for missing a fraud case is 5 times as high as for missing a genuine transaction
+    class_weight={0:1, 1:5}
 )
 
-model.fit(X=x_train, y=y_train)
-y_predict = model.predict(x_test)
-y_probs = model.predict_proba(x_test)[:, 1]
+# synthetic minority over-sampling technique (SMOTE) injects artificial fraud cases into dataset
+sm = SMOTE(random_state=42, sampling_strategy='auto')
+X_train_res, y_train_res = sm.fit_resample(X_train, y_train)
 
+# training model on modified training/test sets
+rf_model.fit(X=X_train_res, y=y_train_res)
+y_predict = rf_model.predict(X_test)
+y_probs = rf_model.predict_proba(X_test)[:, 1]
+
+# using probabilities returned by model any probability greater than 10% is considered fraud
+# this makes the model very vigilant
+y_pred_new = (y_probs > 0.1).astype(int)
+
+# calculating performance metrics
 roc_auc = roc_auc_score(y_test, y_probs)
-recall = recall_score(y_test, y_predict)
-prec = precision_score(y_test, y_predict)
+recall = recall_score(y_test, y_pred_new)
+precision = precision_score(y_test, y_pred_new)
+acc = accuracy_score(y_test, y_pred_new)
 
+# printing metrics
+print(f'Accuracy: {acc}')
 print(f'ROC AUC: {roc_auc}')
 print(f'Recall: {recall}')
-print(f'Precision: {prec:}')
+print(f'Precision: {precision:}')
